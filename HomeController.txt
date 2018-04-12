@@ -1,0 +1,236 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Web;
+using System.Web.Mvc;
+using Autorizaciones.Models;
+using Autorizaciones.Models.Cias;
+using Autorizaciones.Models.Back;
+using Bluekey.Licensing;
+
+
+namespace Autorizaciones.Controllers
+{
+    public class HomeController : Controller
+    {
+        private ModelCias  dbs = new ModelCias();
+        public ActionResult Index()
+        {
+            endSessionObject();
+            LoadSessionObject();
+            return View();
+        }
+
+        [HttpGet]
+        public ActionResult Login(int? SeleccionaCia)
+        {
+            try
+            {
+                validateLicensing();
+                List<SelectListItem> cias = new List<SelectListItem>();
+                // ---- se comenta linea para cozumeleño -----
+                //cias.Add(new SelectListItem { Text = "--Selecciona Compañia--", Value = "0" });
+                foreach (var c in dbs.CONMAESTRO )
+                {
+                    cias.Add(new SelectListItem
+                    {
+                        Text = c.Razon_Social,
+                        Value = Convert.ToString (int.Parse (c.Codigo_Cia ))
+                    });
+                }
+                ViewBag.IdCia = cias;
+
+                return View();
+            }
+            catch (Exception)
+            {
+                ModelState.AddModelError("", "No se pudo conectar a la Base de Datos!");
+                throw;
+            }
+
+        }
+
+        private void validateLicensing()
+        {
+            try
+            {
+                //var executingAssembly = new System.IO.FileInfo((System.Reflection.Assembly.GetExecutingAssembly().Location)).Directory.FullName;
+                //string path = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                String rootPath = Server.MapPath("~");
+                string pathpublic = rootPath + @"Licensing\publickey.xml";
+                string pathlicense = rootPath + @"Licensing\license.xml";
+                var publicKey = System.IO.File.ReadAllText(pathpublic);
+                new LicenseValidator(publicKey, pathlicense )
+                  .AssertValidLicense();
+            }
+            catch (Exception)
+            {
+
+                ModelState.AddModelError("", "Su licencia no es valida o expiro!");
+                throw;
+            }
+                       
+          
+        }
+
+        [HttpPost]
+        public ActionResult Login(int?IdCia, Models.Back.USUARIOS  user)
+        {
+            var ciaId = int.Parse (Request["IdCia"]);
+            if (ciaId == 0)
+            {
+                List<SelectListItem> cias = new List<SelectListItem>();
+                // ---- se comento para cozumeleño -----
+                //cias.Add(new SelectListItem { Text = "--Selecciona Compañia--", Value = "0" });
+                foreach (var c in dbs.CONMAESTRO.OrderBy (x => x.Codigo_Cia) )
+                {
+                    cias.Add(new SelectListItem
+                    {
+                        Text = c.Razon_Social,
+                        Value = Convert.ToString(int.Parse(c.Codigo_Cia))
+                    });
+                }
+                ViewBag.IdCia = cias;
+                ModelState.AddModelError("", "Debe seleccionar una compañia");
+                return View();
+            }
+
+            var cod_cia= IdCia.ToString ().PadLeft(3, '0');
+            string connectionStringName = dbs.CONMAESTRO.Where( x => x.Codigo_Cia == cod_cia )
+                                         .Select(c => c.Nombre_Base)
+                                         .FirstOrDefault();
+            connectionStringName = "Context" + connectionStringName;
+            System.Web.HttpContext.Current.Session["sessionString"] = connectionStringName;
+                        
+            string raz_soc = dbs.CONMAESTRO.Where(x => x.Codigo_Cia == cod_cia)
+                                         .Select(c => c.Razon_Social)
+                                         .FirstOrDefault();
+            System.Web.HttpContext.Current.Session["sessionRS"] = raz_soc;
+
+            if (ModelState.IsValid)
+            {
+
+                ModelBack  db = new ModelBack(connectionStringName);
+
+                if (user.IsValid(user.Codigo, user.Password ))
+                {
+                    //return RedirectToAction("Index", "Home");
+                    var rolc = db.USUARIOS.Where(u => u.Codigo == user.Codigo )
+                        .Select(u => u.Autoriza_Requisicion )
+                        .FirstOrDefault();
+
+                    var rolp = db.USUARIOS.Where(u => u.Codigo == user.Codigo)
+                       .Select(u => u.Autoriza_Pedido)
+                       .FirstOrDefault();
+
+                    var nombreUsuario = db.USUARIOS.Where(u => u.Codigo  == user.Codigo)
+                       .Select(u => u.Nombre)
+                       .FirstOrDefault();
+
+                    var usuario = db.USUARIOS.Where(u => u.Codigo == user.Codigo)
+                      .Select(u => u.Codigo)
+                      .FirstOrDefault();
+
+                    System.Web.HttpContext.Current.Session["nombreUsuario"] = nombreUsuario;
+                    System.Web.HttpContext.Current.Session["usuario"] = usuario;
+                                       
+                    if (rolc == true )
+                    {
+                       // solo requisiciones
+                        System.Web.HttpContext.Current.Session["AutReq"] = true; 
+                    }
+                    else
+                    { System.Web.HttpContext.Current.Session["AutReq"] = false; }
+                    if (rolp == true)
+                    {
+                        // requisiciones y  pedidos
+                        System.Web.HttpContext.Current.Session["AutPed"] = true; 
+                    }
+                    else
+                    { System.Web.HttpContext.Current.Session["AutPed"] = false; }
+                   
+                    return RedirectToAction("Index", "Home");
+
+                    //switch (rol)
+                    //{
+                    //    case 1:                           
+                    //        return RedirectToAction("Index", "Requisiciones");
+
+                    //    case 2:
+                    //        return RedirectToAction("Index", "Pedidos");
+
+                    //    default:
+                    //        return RedirectToAction("Index", "Home");
+                    //}
+
+                }
+                else
+                {
+                    ModelState.AddModelError("", "Los datos son incorrectos!");
+                    //ViewBag.Message = ".";
+                    List<SelectListItem> cias = new List<SelectListItem>();
+                    cias.Add(new SelectListItem { Text = "--Selecciona Compañia--", Value = "0" });
+                    foreach (var c in dbs.CONMAESTRO)
+                    {
+                        cias.Add(new SelectListItem
+                        {
+                            Text = c.Razon_Social,
+                            Value = Convert.ToString(int.Parse(c.Codigo_Cia))
+                        });
+                    }
+                    ViewBag.IdCia = cias;
+                }
+            }
+            else
+            {
+                List<SelectListItem> cias = new List<SelectListItem>();
+                cias.Add(new SelectListItem { Text = "--Selecciona Compañia--", Value = "0" });
+                foreach (var c in dbs.CONMAESTRO)
+                {
+                    cias.Add(new SelectListItem
+                    {
+                        Text = c.Razon_Social,
+                        Value = Convert.ToString(int.Parse(c.Codigo_Cia))
+                    });
+                }
+                ViewBag.IdCia = cias;
+                //ModelState.AddModelError("Usuario1", "Ingrese un usuario");
+                //ModelState.AddModelError("Contrasena", "Ingrese una contraseña");
+                return View(user);
+            }
+
+            //Models.Ordene requis = new Models.Ordene();
+            return View(user);
+        }
+
+        private void LoadSessionObject()
+        {
+            // Load session from HttpContext.
+            string connectionStringName = System.Web.HttpContext.Current.Session["sessionString"] as String ;
+            ModelBack  db = new ModelBack(connectionStringName);
+
+            var reqAlm = db.C001INVGEN.Where(x => x.Stat_Aut == false  && x.Tipo_Mov == "SAL").Count();
+            var reqCom = db.C001COMRQG.Where(x => x.Status_Req == false
+                                               && x.Cod_Dep != ""
+                                               && x.Cod_Prio != "").Count();
+            var reqPed = db.C001COMPDG.Where(x => x.Autoriza == false || x.Autoriza2==false).Count();
+
+            ViewData["reqAlm"] = reqAlm.ToString();
+            ViewData["reqCom"] = reqCom.ToString();
+            ViewData["reqPed"] = reqPed.ToString();
+            ViewData["razonsocial"] = System.Web.HttpContext.Current.Session["sessionRS"] as String;
+            ViewData["nombreUsuario"] = System.Web.HttpContext.Current.Session["nombreUsuario"] as String;
+        }
+
+        private void endSessionObject()
+        {
+            System.Web.HttpContext.Current.Session["sessionFilterAlm"] = null;
+            System.Web.HttpContext.Current.Session["TotalAut"] = null;
+            System.Web.HttpContext.Current.Session["sessionFilterCom"] =null;
+            System.Web.HttpContext.Current.Session["TotalAutCompras"] = null;
+            System.Web.HttpContext.Current.Session["sessionFilterPed"] = null;
+            System.Web.HttpContext.Current.Session["TotalAutPed1"] = null;
+            System.Web.HttpContext.Current.Session["TotalAutPed2"] = null;
+        }
+    }
+}
